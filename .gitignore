@@ -1,0 +1,25 @@
+# Agent related
+.mcp.json
+.claude/
+CLAUDE.md
+PRODUCT_SPEC.md
+
+chatbot-indexing/dataset/
+
+# TestSprite
+testsprite_tests/
+
+# Crawler
+crawler/
+
+#MCP
+.mcp.json
+
+# Node modules and dependencies
+node_modules/
+*/node_modules/
+dist/
+*/dist/
+build/
+*/build/
+.env

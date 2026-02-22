@@ -1,0 +1,11 @@
+{
+  "database-url-var": "DATABASE_URL",
+  "migrations-dir": "src/migrations",
+  "migrations-table": "pgmigrations",
+  "tsconfig": "tsconfig.json",
+  "migration-file-language": "js",
+  "check-order": true,
+  "verbose": true,
+  "ignore-pattern": ".*\\.sql$|README\\.md"
+}
+
