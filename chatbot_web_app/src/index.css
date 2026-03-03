@@ -38,3 +38,82 @@ code {
 .material-symbols-outlined {
   font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
 }
+
+/* Markdown styles for bot responses */
+.prose-bot p {
+  margin-bottom: 0.5em;
+}
+
+.prose-bot p:last-child {
+  margin-bottom: 0;
+}
+
+.prose-bot strong {
+  font-weight: 700;
+}
+
+.prose-bot ol {
+  list-style-type: decimal;
+  padding-left: 1.5em;
+  margin-top: 0.5em;
+  margin-bottom: 0.5em;
+}
+
+.prose-bot ul {
+  list-style-type: disc;
+  padding-left: 1.5em;
+  margin-top: 0.5em;
+  margin-bottom: 0.5em;
+}
+
+.prose-bot li {
+  margin-bottom: 0.25em;
+}
+
+.prose-bot blockquote {
+  border-left: 3px solid #E87722;
+  padding-left: 0.75em;
+  margin: 0.5em 0;
+  font-style: italic;
+  opacity: 0.9;
+}
+
+.prose-bot code {
+  background-color: rgba(0, 0, 0, 0.06);
+  padding: 0.15em 0.35em;
+  border-radius: 0.25em;
+  font-size: 0.875em;
+}
+
+.dark .prose-bot code {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.prose-bot a {
+  color: #E87722;
+  text-decoration: underline;
+}
+
+.prose-bot h1, .prose-bot h2, .prose-bot h3, .prose-bot h4 {
+  font-weight: 700;
+  margin-top: 0.75em;
+  margin-bottom: 0.25em;
+}
+
+.prose-bot h1 { font-size: 1.25em; }
+.prose-bot h2 { font-size: 1.125em; }
+.prose-bot h3 { font-size: 1em; }
+.prose-bot h4 { font-size: 0.9375em; }
+
+.prose-bot table {
+  @apply w-full border-collapse my-3 text-sm;
+}
+.prose-bot th {
+  @apply bg-gray-100 dark:bg-gray-700 text-left px-3 py-2 border border-gray-300 dark:border-gray-600 font-semibold;
+}
+.prose-bot td {
+  @apply px-3 py-2 border border-gray-300 dark:border-gray-600;
+}
+.prose-bot tr:nth-child(even) {
+  @apply bg-gray-50 dark:bg-gray-800;
+}

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { WebSocketMessage, ChatMessage } from '../types/chat';
+import { WebSocketMessage, ChatMessage, SourceLink } from '../types/chat';
 import websocketService from '../services/websocket.service';
 import apiService from '../services/api.service';
 
@@ -8,6 +8,7 @@ interface UseChatReturn {
   messages: ChatMessage[];
   isConnected: boolean;
   isLoading: boolean;
+  isStreaming: boolean;
   error: string | null;
   sendMessage: (message: string) => void;
   clearMessages: () => void;
@@ -17,6 +18,7 @@ interface UseChatReturn {
 export const useChat = (sessionId?: string): UseChatReturn => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isConnected, setIsConnected] = useState(false);
+  const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected' | 'error'>('disconnected');
   
@@ -71,15 +73,15 @@ export const useChat = (sessionId?: string): UseChatReturn => {
     }
   }, [sessionId]);
 
-  const handleBotResponse = useCallback((message: WebSocketMessage) => {
+  const handleBotResponse = useCallback((message: WebSocketMessage & { sourceLinks?: SourceLink[] }) => {
     // Find the last user message and update it with bot response
     setMessages(prev => {
       const lastMessage = prev[prev.length - 1];
       if (lastMessage && !lastMessage.bot_response) {
         // Update the last message with bot response
-        return prev.map((msg, index) => 
-          index === prev.length - 1 
-            ? { ...msg, bot_response: message.content }
+        return prev.map((msg, index) =>
+          index === prev.length - 1
+            ? { ...msg, bot_response: message.content, sourceLinks: message.sourceLinks }
             : msg
         );
       }
@@ -115,10 +117,65 @@ export const useChat = (sessionId?: string): UseChatReturn => {
   const handleConnectionChange = useCallback((connected: boolean) => {
     setIsConnected(connected);
     setConnectionStatus(connected ? 'connected' : 'disconnected');
-    
+
     if (connected) {
       setError(null);
     }
+  }, []);
+
+  // Streaming event handlers
+  const handleStreamStart = useCallback(() => {
+    setIsStreaming(true);
+    setMessages(prev => {
+      const lastMsg = prev[prev.length - 1];
+      if (lastMsg && lastMsg.isStreaming) {
+        return prev;
+      }
+      return prev.map((msg, i) =>
+        i === prev.length - 1 ? { ...msg, isStreaming: true } : msg
+      );
+    });
+  }, []);
+
+  const handleStreamChunk = useCallback((data: { content: string }) => {
+    setMessages(prev => {
+      let idx = -1;
+      for (let i = prev.length - 1; i >= 0; i--) {
+        if (prev[i].isStreaming) { idx = i; break; }
+      }
+      if (idx === -1) return prev;
+      return prev.map((msg, i) =>
+        i === idx ? { ...msg, bot_response: msg.bot_response + data.content } : msg
+      );
+    });
+  }, []);
+
+  const handleStreamEnd = useCallback((data: { content: string; sourceLinks?: SourceLink[] }) => {
+    setIsStreaming(false);
+    setMessages(prev => {
+      let idx = -1;
+      for (let i = prev.length - 1; i >= 0; i--) {
+        if (prev[i].isStreaming) { idx = i; break; }
+      }
+      if (idx === -1) return prev;
+      return prev.map((msg, i) =>
+        i === idx ? { ...msg, bot_response: data.content, isStreaming: false, sourceLinks: data.sourceLinks } : msg
+      );
+    });
+  }, []);
+
+  const handleStreamError = useCallback((data: { error: string }) => {
+    setIsStreaming(false);
+    setMessages(prev => {
+      let idx = -1;
+      for (let i = prev.length - 1; i >= 0; i--) {
+        if (prev[i].isStreaming) { idx = i; break; }
+      }
+      if (idx === -1) return prev;
+      return prev.map((msg, i) =>
+        i === idx ? { ...msg, bot_response: `Lỗi: ${data.error}`, isStreaming: false } : msg
+      );
+    });
   }, []);
 
   // Initialize WebSocket connection
@@ -136,10 +193,14 @@ export const useChat = (sessionId?: string): UseChatReturn => {
       websocketService.onChatHistory(handleChatHistory);
       websocketService.onTyping(handleTypingIndicator);
       websocketService.onConnectionChange(handleConnectionChange);
+      websocketService.onStreamStart(handleStreamStart);
+      websocketService.onStreamChunk(handleStreamChunk);
+      websocketService.onStreamEnd(handleStreamEnd);
+      websocketService.onStreamError(handleStreamError);
 
       // Connect to WebSocket
       await websocketService.connect(sessionId);
-      
+
     } catch (error) {
       console.error('Failed to initialize WebSocket:', error);
       setConnectionStatus('error');
@@ -154,7 +215,11 @@ export const useChat = (sessionId?: string): UseChatReturn => {
     handleSessionJoined,
     handleChatHistory,
     handleTypingIndicator,
-    handleConnectionChange
+    handleConnectionChange,
+    handleStreamStart,
+    handleStreamChunk,
+    handleStreamEnd,
+    handleStreamError,
   ]);
 
   // Initialize WebSocket connection
@@ -176,7 +241,7 @@ export const useChat = (sessionId?: string): UseChatReturn => {
   }, [chatHistory]);
 
   const sendMessage = useCallback((message: string) => {
-    if (!message.trim()) return;
+    if (!message.trim() || isStreaming) return;
 
     // Add user message to local state immediately
     const userMessage: ChatMessage = {
@@ -185,6 +250,7 @@ export const useChat = (sessionId?: string): UseChatReturn => {
       user_message: message.trim(),
       bot_response: '',
       timestamp: new Date(),
+      isStreaming: true,
     };
 
     setMessages(prev => [...prev, userMessage]);
@@ -193,7 +259,8 @@ export const useChat = (sessionId?: string): UseChatReturn => {
     if (isConnected && websocketService.getConnectionStatus()) {
       websocketService.sendMessage(message.trim());
     } else {
-      // Fallback to REST API
+      // Fallback to REST API (non-streaming)
+      userMessage.isStreaming = false;
       if (sessionId) {
         sendMessageMutation.mutate({ sessionId, message: message.trim() });
       } else {
@@ -203,7 +270,7 @@ export const useChat = (sessionId?: string): UseChatReturn => {
 
     // Clear any existing error
     setError(null);
-  }, [isConnected, sessionId, sendMessageMutation]);
+  }, [isConnected, isStreaming, sessionId, sendMessageMutation]);
 
   const clearMessages = useCallback(() => {
     setMessages([]);
@@ -223,6 +290,7 @@ export const useChat = (sessionId?: string): UseChatReturn => {
     messages,
     isConnected,
     isLoading,
+    isStreaming,
     error,
     sendMessage,
     clearMessages,

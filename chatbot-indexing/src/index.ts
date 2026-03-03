@@ -126,7 +126,7 @@ function loadConfig(): PipelineConfig {
       process.env.EMBEDDING_DIMENSIONS || "1536",
       10,
     ),
-    batchSize: parseInt(process.env.BATCH_SIZE || "100", 10),
+    batchSize: parseInt(process.env.BATCH_SIZE || "50", 10),
     dryRun,
     rawDataDir: path.join(__dirname, "..", "dataset", "raw"),
     jsonOutputDir: path.join(__dirname, "..", "dataset", "json"),
@@ -143,6 +143,81 @@ function saveChunksToJson(
   const filePath = path.join(outputDir, `${sourceType}_chunks.json`);
   fs.writeFileSync(filePath, JSON.stringify(chunks, null, 2), "utf-8");
   console.log(`  💾 Saved ${chunks.length} chunks to ${filePath}`);
+}
+
+/** Sleep for a given number of milliseconds */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Check if an error is a retryable network/connection error */
+function isRetryableError(err: any): boolean {
+  // HTTP 429 rate limit
+  if (err?.status === 429) return true;
+
+  // Connection/network errors by error code
+  const retryableCodes = ["ECONNRESET", "ECONNREFUSED", "ETIMEDOUT", "EPIPE"];
+  if (retryableCodes.includes(err?.code)) return true;
+
+  // Pinecone and fetch connection errors by name/message
+  const msg = (err?.message || "").toLowerCase();
+  const name = (err?.name || "").toLowerCase();
+  if (name.includes("pineconeconnectionerror")) return true;
+  if (name === "typeerror" && msg.includes("fetch failed")) return true;
+  if (msg.includes("other side closed")) return true;
+  if (msg.includes("socket hang up")) return true;
+
+  return false;
+}
+
+/**
+ * Generic retry wrapper with exponential backoff + jitter.
+ * Retries on 429 (rate limit) and transient network/connection errors.
+ */
+async function withRetry<T>(
+  operation: () => Promise<T>,
+  label: string,
+  maxRetries: number = 5,
+): Promise<T> {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await operation();
+    } catch (err: any) {
+      if (isRetryableError(err) && attempt < maxRetries) {
+        // Use retry-after-ms header if available (OpenAI 429s), otherwise exponential backoff
+        const retryAfterMs =
+          err.headers?.["retry-after-ms"]
+            ? parseInt(err.headers["retry-after-ms"], 10)
+            : undefined;
+        const backoffMs = retryAfterMs ?? Math.min(1000 * 2 ** attempt, 60000);
+        // Add small jitter to avoid thundering herd
+        const waitMs = backoffMs + Math.random() * 500;
+        const reason = err?.status === 429 ? "Rate limited" : `Network error (${err.name || err.code || "unknown"})`;
+        console.log(
+          `  ⏳ ${reason} during ${label}, retrying in ${Math.round(waitMs)}ms (attempt ${attempt + 1}/${maxRetries})...`,
+        );
+        await sleep(waitMs);
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new Error(`withRetry(${label}): unreachable`);
+}
+
+/** Call OpenAI embeddings API with retry on transient errors */
+async function embedWithRetry(
+  openai: OpenAI,
+  model: string,
+  dimensions: number,
+  input: string[],
+  maxRetries: number = 5,
+): Promise<OpenAI.Embeddings.CreateEmbeddingResponse> {
+  return withRetry(
+    () => openai.embeddings.create({ model, dimensions, input }),
+    "embedding",
+    maxRetries,
+  );
 }
 
 /** Generate embeddings in batches via OpenAI */
@@ -164,11 +239,7 @@ async function generateEmbeddings(
       `  🧠 Embedding batch ${batchNum}/${totalBatches} (${batch.length} texts)...`,
     );
 
-    const response = await openai.embeddings.create({
-      model,
-      dimensions,
-      input: batch,
-    });
+    const response = await embedWithRetry(openai, model, dimensions, batch);
 
     const embeddings = response.data
       .sort((a, b) => a.index - b.index)
@@ -224,7 +295,10 @@ async function upsertToPinecone(
       `  📤 Upserting batch ${batchNum}/${totalBatches} (${vectors.length} vectors)...`,
     );
 
-    await index.upsert(vectors);
+    await withRetry(
+      () => index.upsert(vectors),
+      `Pinecone upsert batch ${batchNum}/${totalBatches}`,
+    );
     totalUpserted += vectors.length;
   }
 
@@ -255,10 +329,11 @@ async function main(): Promise<void> {
   console.log("");
 
   const lawsDir = path.join(config.rawDataDir, "laws");
+  const lawsSourceDir = path.join(config.rawDataDir, "laws-source");
   const precedentsDir = path.join(config.rawDataDir, "precedents");
   const faqDir = path.join(config.rawDataDir, "faq");
 
-  let lawChunks = fs.existsSync(lawsDir) ? parseAllLaws(lawsDir) : [];
+  let lawChunks = fs.existsSync(lawsDir) ? parseAllLaws(lawsDir, lawsSourceDir) : [];
   console.log("");
 
   let precedentChunks = fs.existsSync(precedentsDir)

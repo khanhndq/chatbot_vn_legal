@@ -20,6 +20,7 @@ const Chat: React.FC<ChatProps> = ({
     messages,
     isConnected,
     isLoading,
+    isStreaming,
     error,
     sendMessage,
     connectionStatus,
@@ -34,7 +35,9 @@ const Chat: React.FC<ChatProps> = ({
   }, [messages]);
 
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    messagesEndRef.current?.scrollIntoView({
+      behavior: isStreaming ? ("instant" as ScrollBehavior) : "smooth",
+    });
   };
 
   const handleSuggestionClick = (suggestion: string) => {
@@ -42,9 +45,9 @@ const Chat: React.FC<ChatProps> = ({
   };
 
   const suggestions = [
-    "Tell me about Future First",
-    "Compare insurance plans",
-    "Premium calculators",
+    "Hợp đồng lao động được quy định như thế nào?",
+    "Người lao động có quyền đơn phương chấm dứt hợp đồng không?",
+    "Thời gian thử việc tối đa là bao lâu?",
   ];
 
   return (
@@ -70,17 +73,17 @@ const Chat: React.FC<ChatProps> = ({
               VietLegal Assistant
             </h1>
             <p className="text-center text-slate-600 dark:text-slate-400 mb-12 max-w-md leading-relaxed">
-              Hi, I can help you with these plans:{" "}
+              Xin chào, tôi có thể hỗ trợ bạn về:{" "}
               <span className="font-semibold text-slate-800 dark:text-slate-200">
-                Future First
+                Luật Lao động
               </span>
               ,{" "}
               <span className="font-semibold text-slate-800 dark:text-slate-200">
-                Invest First Max
+                Bảo hiểm xã hội & Bảo hiểm y tế
               </span>{" "}
-              or{" "}
+              và{" "}
               <span className="font-semibold text-slate-800 dark:text-slate-200">
-                Life Protection
+                Thuế, Luật Doanh nghiệp & Luật Dân sự
               </span>
               .
             </p>
@@ -102,8 +105,12 @@ const Chat: React.FC<ChatProps> = ({
             <div className="w-full">
               <MessageInput
                 onSendMessage={sendMessage}
-                disabled={!isConnected || connectionStatus === "error"}
-                placeholder="Ask me anything about these plans: Future First, Invest First Max or Life Protection."
+                disabled={!isConnected || connectionStatus === "error" || isStreaming}
+                placeholder={
+                  isStreaming
+                    ? "Đang trả lời..."
+                    : "Hỏi tôi bất cứ điều gì về luật lao động, bảo hiểm, thuế, doanh nghiệp hoặc pháp luật dân sự..."
+                }
                 isWelcomeScreen={true}
               />
             </div>
@@ -118,15 +125,6 @@ const Chat: React.FC<ChatProps> = ({
               ref={chatContainerRef}
               className="flex-1 overflow-y-auto space-y-4 mb-4"
             >
-              {isLoading && (
-                <div className="flex justify-center items-center py-8">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-                  <span className="ml-2 text-slate-600 dark:text-slate-400">
-                    Loading chat history...
-                  </span>
-                </div>
-              )}
-
               {messages.map((message, index) => (
                 <Message
                   key={message.id}
@@ -154,9 +152,13 @@ const Chat: React.FC<ChatProps> = ({
             {/* Message Input for Chat View */}
             <MessageInput
               onSendMessage={sendMessage}
-              disabled={!isConnected || connectionStatus === "error"}
+              disabled={!isConnected || connectionStatus === "error" || isStreaming}
               placeholder={
-                !isConnected ? "Connecting..." : "Type your message..."
+                isStreaming
+                  ? "Đang trả lời..."
+                  : !isConnected
+                    ? "Đang kết nối..."
+                    : "Nhập tin nhắn..."
               }
               isWelcomeScreen={false}
             />

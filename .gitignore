@@ -4,7 +4,8 @@
 CLAUDE.md
 PRODUCT_SPEC.md
 
-chatbot-indexing/dataset/
+chatbot-indexing/dataset/json
+chatbot-indexing/dataset/raw
 
 # TestSprite
 testsprite_tests/

@@ -107,6 +107,13 @@ function formatResult(r: LegalSearchResult): Record<string, unknown> {
   if (r.metadata.case_type) base.case_type = r.metadata.case_type;
   if (r.metadata.section) base.section = r.metadata.section;
   if (r.metadata.question) base.question = r.metadata.question;
+  if (r.metadata.link) base.link = r.metadata.link;
+
+  // Construct link for precedents from document_name if no explicit link
+  if (!base.link && r.source_type === 'precedent' && r.document_name) {
+    const docPrefix = r.document_name.split('_')[0];
+    base.link = `https://anle.toaan.gov.vn/webcenter/ShowProperty?nodeId=/UCMServer/${docPrefix}`;
+  }
 
   return base;
 }
@@ -167,6 +174,7 @@ async function searchLegalCBRRAG(
     const results = await queryPinecone(queryVector, topK, {
       source_type: { $eq: sourceType },
     });
+    console.log("RAG results: ", results);
     return { rag_results: results, cbr_results: [], total: results.length };
   }
 
@@ -174,6 +182,7 @@ async function searchLegalCBRRAG(
     const results = await queryPinecone(queryVector, topK, {
       source_type: { $eq: "precedent" },
     });
+    console.log("CBR results: ", results);
     return { rag_results: [], cbr_results: results, total: results.length };
   }
 
@@ -182,7 +191,8 @@ async function searchLegalCBRRAG(
     ragSearch(queryVector, topK),
     cbrSearch(queryVector, Math.min(topK, 3)), // Fewer precedents (they're longer)
   ]);
-
+  console.log("RAG results: ", ragResults);
+  console.log("CBR results: ", cbrResults);
   return {
     rag_results: ragResults,
     cbr_results: cbrResults,
@@ -212,8 +222,8 @@ export const legalToolExecutor: ToolExecutor = async (
 
     console.log(
       `🔍 [CBR+RAG] Searching legal KB for: "${query}"` +
-        (sourceType ? ` [filter: ${sourceType}]` : "") +
-        ` [top_k: ${topK}]`,
+      (sourceType ? ` [filter: ${sourceType}]` : "") +
+      ` [top_k: ${topK}]`,
     );
 
     try {

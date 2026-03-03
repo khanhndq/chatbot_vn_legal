@@ -1,5 +1,5 @@
 import { io, Socket } from 'socket.io-client';
-import { WebSocketMessage, ChatEvent, TypingIndicator } from '../types/chat';
+import { WebSocketMessage, ChatEvent, TypingIndicator, SourceLink } from '../types/chat';
 
 class WebSocketService {
   private socket: Socket | null = null;
@@ -11,13 +11,17 @@ class WebSocketService {
 
   // Event callbacks
   private onMessageCallback: ((message: WebSocketMessage) => void) | null = null;
-  private onBotResponseCallback: ((message: WebSocketMessage) => void) | null = null;
+  private onBotResponseCallback: ((message: WebSocketMessage & { sourceLinks?: SourceLink[] }) => void) | null = null;
   private onErrorCallback: ((message: WebSocketMessage) => void) | null = null;
   private onSessionCreatedCallback: ((data: { sessionId: string }) => void) | null = null;
   private onSessionJoinedCallback: ((data: { sessionId: string }) => void) | null = null;
   private onChatHistoryCallback: ((history: any[]) => void) | null = null;
   private onTypingCallback: ((data: TypingIndicator) => void) | null = null;
   private onConnectionChangeCallback: ((connected: boolean) => void) | null = null;
+  private onStreamStartCallback: ((data: { sessionId: string; timestamp: string }) => void) | null = null;
+  private onStreamChunkCallback: ((data: { content: string; sessionId: string; timestamp: string }) => void) | null = null;
+  private onStreamEndCallback: ((data: { content: string; sessionId: string; timestamp: string; sourceLinks?: SourceLink[] }) => void) | null = null;
+  private onStreamErrorCallback: ((data: { error: string; sessionId: string; timestamp: string }) => void) | null = null;
 
   constructor() {
     this.setupEventListeners();
@@ -174,6 +178,34 @@ class WebSocketService {
     this.socket.on('pong', (data: { timestamp: number }) => {
       console.log('🏓 Pong received:', new Date(data.timestamp));
     });
+
+    // Handle streaming events
+    this.socket.on('stream_start', (data: { sessionId: string; timestamp: string }) => {
+      console.log('🔄 Stream started');
+      if (this.onStreamStartCallback) {
+        this.onStreamStartCallback(data);
+      }
+    });
+
+    this.socket.on('stream_chunk', (data: { content: string; sessionId: string; timestamp: string }) => {
+      if (this.onStreamChunkCallback) {
+        this.onStreamChunkCallback(data);
+      }
+    });
+
+    this.socket.on('stream_end', (data: { content: string; sessionId: string; timestamp: string }) => {
+      console.log('✅ Stream ended');
+      if (this.onStreamEndCallback) {
+        this.onStreamEndCallback(data);
+      }
+    });
+
+    this.socket.on('stream_error', (data: { error: string; sessionId: string; timestamp: string }) => {
+      console.error('❌ Stream error:', data.error);
+      if (this.onStreamErrorCallback) {
+        this.onStreamErrorCallback(data);
+      }
+    });
   }
 
   private handleReconnection(): void {
@@ -224,7 +256,8 @@ class WebSocketService {
       const chatEvent: ChatEvent = {
         sessionId: this.sessionId,
         userMessage: message,
-        timestamp: new Date()
+        timestamp: new Date(),
+        stream: true,
       };
       this.socket.emit('chat_message', chatEvent);
     } else {
@@ -255,7 +288,7 @@ class WebSocketService {
     this.onMessageCallback = callback;
   }
 
-  onBotResponse(callback: (message: WebSocketMessage) => void): void {
+  onBotResponse(callback: (message: WebSocketMessage & { sourceLinks?: SourceLink[] }) => void): void {
     this.onBotResponseCallback = callback;
   }
 
@@ -281,6 +314,22 @@ class WebSocketService {
 
   onConnectionChange(callback: (connected: boolean) => void): void {
     this.onConnectionChangeCallback = callback;
+  }
+
+  onStreamStart(callback: (data: { sessionId: string; timestamp: string }) => void): void {
+    this.onStreamStartCallback = callback;
+  }
+
+  onStreamChunk(callback: (data: { content: string; sessionId: string; timestamp: string }) => void): void {
+    this.onStreamChunkCallback = callback;
+  }
+
+  onStreamEnd(callback: (data: { content: string; sessionId: string; timestamp: string; sourceLinks?: SourceLink[] }) => void): void {
+    this.onStreamEndCallback = callback;
+  }
+
+  onStreamError(callback: (data: { error: string; sessionId: string; timestamp: string }) => void): void {
+    this.onStreamErrorCallback = callback;
   }
 
   // Getters

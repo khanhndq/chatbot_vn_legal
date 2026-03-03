@@ -17,6 +17,29 @@ const CHAPTER_REGEX = /^(Chương\s+[IVXLCDM\d]+)\s*[.\-–:]*\s*(.*)$/im;
 const SECTION_REGEX = /^(Mục\s+\d+)\s*[.\-–:]*\s*(.*)$/im;
 const ARTICLE_REGEX = /^(Điều\s+\d+)\s*[.\-–:]*\s*(.*)$/im;
 
+/**
+ * Build a map of document name → source URL from laws-source/ path.txt files.
+ * Skips entries starting with "TODO".
+ */
+export function buildLinkMap(lawsSourceDir: string): Map<string, string> {
+  const linkMap = new Map<string, string>();
+  if (!fs.existsSync(lawsSourceDir)) return linkMap;
+
+  const folders = fs.readdirSync(lawsSourceDir, { withFileTypes: true });
+  for (const entry of folders) {
+    if (!entry.isDirectory()) continue;
+    const pathFile = path.join(lawsSourceDir, entry.name, "path.txt");
+    if (!fs.existsSync(pathFile)) continue;
+
+    const url = fs.readFileSync(pathFile, "utf-8").trim();
+    if (url.startsWith("TODO")) continue;
+
+    linkMap.set(entry.name, url);
+  }
+
+  return linkMap;
+}
+
 /** Rough token count (Vietnamese text: ~1 token per word/syllable) */
 function estimateTokens(text: string): number {
   return text.split(/\s+/).filter((w) => w.length > 0).length;
@@ -57,7 +80,7 @@ interface ArticleBlock {
 /**
  * Parse a single law file into article-level chunks.
  */
-export function parseLawFile(filePath: string): Chunk[] {
+export function parseLawFile(filePath: string, link?: string): Chunk[] {
   const content = fs.readFileSync(filePath, "utf-8");
   const docName = path.basename(filePath, path.extname(filePath));
   const docTitle = extractDocumentTitle(content);
@@ -146,16 +169,19 @@ export function parseLawFile(filePath: string): Chunk[] {
   const chunks: Chunk[] = [];
 
   if (estimateTokens(preambleText) > 50) {
+    const preambleMetadata: LawMetadata = {
+      source_type: "law",
+      document_name: docName,
+      document_title: docTitle,
+      article: "Phần mở đầu",
+      article_title: "Lời nói đầu / Preamble",
+    };
+    if (link) preambleMetadata.link = link;
+
     chunks.push({
       id: `law:${docName}:preamble`,
       text: preambleText,
-      metadata: {
-        source_type: "law",
-        document_name: docName,
-        document_title: docTitle,
-        article: "Phần mở đầu",
-        article_title: "Lời nói đầu / Preamble",
-      },
+      metadata: preambleMetadata,
     });
   }
 
@@ -205,6 +231,7 @@ export function parseLawFile(filePath: string): Chunk[] {
     if (block.chapterTitle) metadata.chapter_title = block.chapterTitle;
     if (block.section) metadata.section = block.section;
     if (block.sectionTitle) metadata.section_title = block.sectionTitle;
+    if (link) metadata.link = link;
 
     chunks.push({
       id: makeChunkId(docName, block.article),
@@ -218,8 +245,11 @@ export function parseLawFile(filePath: string): Chunk[] {
 
 /**
  * Parse all law files from a directory.
+ * If lawsSourceDir is provided, reads path.txt files to attach source URLs.
  */
-export function parseAllLaws(lawsDir: string): Chunk[] {
+export function parseAllLaws(lawsDir: string, lawsSourceDir?: string): Chunk[] {
+  const linkMap = lawsSourceDir ? buildLinkMap(lawsSourceDir) : new Map<string, string>();
+
   const files = fs
     .readdirSync(lawsDir)
     .filter((f) => f.endsWith(".txt"))
@@ -229,8 +259,10 @@ export function parseAllLaws(lawsDir: string): Chunk[] {
 
   for (const file of files) {
     const filePath = path.join(lawsDir, file);
-    console.log(`  📜 Parsing law: ${file}`);
-    const chunks = parseLawFile(filePath);
+    const docName = path.basename(file, ".txt");
+    const link = linkMap.get(docName);
+    console.log(`  📜 Parsing law: ${file}${link ? " (has link)" : ""}`);
+    const chunks = parseLawFile(filePath, link);
     console.log(`     → ${chunks.length} chunks`);
     allChunks.push(...chunks);
   }

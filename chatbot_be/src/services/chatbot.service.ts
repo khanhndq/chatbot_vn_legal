@@ -1,9 +1,14 @@
 import { v4 as uuidv4 } from 'uuid';
 import { RedisService, ChatbotResponse, SessionData } from './redis.service';
-import { OpenAIService, ChatCompletionMessage, OpenAIMessage } from './open-ai.service';
+import { OpenAIService, ChatCompletionMessage, OpenAIMessage, ToolExecutor } from './open-ai.service';
 import { chatbotTools, chatbotToolExecutor } from '../common/functions';
 import { config } from '../common/config';
 import { SYSTEM_PROMPT } from '../common/prompt';
+
+export interface SourceLink {
+  title: string;
+  url: string;
+}
 
 export interface ChatMessage {
   id: string;
@@ -11,6 +16,7 @@ export interface ChatMessage {
   userMessage: string;
   botResponse: string;
   timestamp: Date;
+  sourceLinks?: SourceLink[];
 }
 
 export interface ChatbotConfig {
@@ -24,7 +30,7 @@ export interface ChatbotConfig {
 
 export interface StreamCallbacks {
   onChunk: (chunk: string) => void;
-  onComplete: (fullResponse: string) => void;
+  onComplete: (fullResponse: string, sourceLinks?: SourceLink[]) => void;
   onError: (error: Error) => void;
 }
 
@@ -37,7 +43,7 @@ export class ChatbotService {
     this.redisService = redisService;
     this.config = {
       defaultResponse: "I'm here to help! How can I assist you today?",
-      maxContextLength: 10,
+      maxContextLength: 6,
       responseDelay: 1000,
       systemPrompt: SYSTEM_PROMPT,
       useOpenAI: config.openai.useOpenAI,
@@ -74,6 +80,7 @@ export class ChatbotService {
       
       let botResponse: string;
       let confidence: number;
+      let sourceLinks: SourceLink[] | undefined;
 
       if (cachedResponse) {
         botResponse = cachedResponse.response;
@@ -84,6 +91,7 @@ export class ChatbotService {
         const response = await this.generateResponse(userMessage, sessionId);
         botResponse = response.response;
         confidence = response.confidence;
+        sourceLinks = response.sourceLinks;
 
         // Cache the response
         await this.redisService.cacheChatbotResponse(userMessage, response);
@@ -98,7 +106,8 @@ export class ChatbotService {
         sessionId,
         userMessage,
         botResponse,
-        timestamp: new Date()
+        timestamp: new Date(),
+        sourceLinks
       };
 
       return chatMessage;
@@ -117,12 +126,56 @@ export class ChatbotService {
   }
 
   /**
+   * Extract source links from raw tool result JSON strings.
+   */
+  private extractSourceLinks(toolResults: string[]): SourceLink[] {
+    const linksMap = new Map<string, SourceLink>();
+
+    for (const raw of toolResults) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (!parsed.found) continue;
+
+        const sections = [parsed.legal_provisions, parsed.case_precedents];
+        for (const section of sections) {
+          if (!section?.results) continue;
+          for (const r of section.results) {
+            if (r.link && typeof r.link === 'string') {
+              const title = r.document_title || r.document_name || r.link;
+              if (!linksMap.has(r.link)) {
+                linksMap.set(r.link, { title, url: r.link });
+              }
+            }
+          }
+        }
+      } catch {
+        // Not valid JSON or not a legal tool result — skip
+      }
+    }
+
+    return Array.from(linksMap.values());
+  }
+
+  /**
+   * Create a wrapper around the tool executor that captures raw result strings.
+   */
+  private createCapturingExecutor(): { executor: ToolExecutor; results: string[] } {
+    const results: string[] = [];
+    const executor: ToolExecutor = async (name, args) => {
+      const result = await chatbotToolExecutor(name, args);
+      results.push(result);
+      return result;
+    };
+    return { executor, results };
+  }
+
+  /**
    * Generate chatbot response based on user message
    */
   private async generateResponse(
     userMessage: string,
     sessionId: string
-  ): Promise<ChatbotResponse> {
+  ): Promise<ChatbotResponse & { sourceLinks?: SourceLink[] }> {
     // Get session context for more contextual responses
     const sessionData = await this.redisService.getSessionData(sessionId);
     const context = sessionData?.context || [];
@@ -133,20 +186,24 @@ export class ChatbotService {
         // Use tools with required tool choice if enabled
         if (this.config.useTools) {
           const messages = this.buildConversationHistoryForTools(context, userMessage);
+          const { executor, results } = this.createCapturingExecutor();
           const response = await this.openAIService.runWithTools(
             messages,
             chatbotTools,
-            chatbotToolExecutor,
+            executor,
             {
               toolChoice: 'required', // Force tool use
               maxToolCalls: 3
             }
           );
 
+          const sourceLinks = this.extractSourceLinks(results);
+
           return {
             response: response.content,
             confidence: 1.0,
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            sourceLinks: sourceLinks.length > 0 ? sourceLinks : undefined
           };
         }
 
@@ -213,16 +270,18 @@ export class ChatbotService {
       const context = sessionData?.context || [];
 
       let fullResponse = '';
+      let sourceLinks: SourceLink[] | undefined;
 
       if (this.config.useOpenAI && this.openAIService) {
         // Use streaming with tools if enabled
         if (this.config.useTools) {
           const messages = this.buildConversationHistoryForTools(context, userMessage);
+          const { executor, results } = this.createCapturingExecutor();
 
           const result = await this.openAIService.streamChatWithTools(
             messages,
             chatbotTools,
-            chatbotToolExecutor,
+            executor,
             (chunk: string) => {
               fullResponse += chunk;
               callbacks.onChunk(chunk);
@@ -234,6 +293,8 @@ export class ChatbotService {
           );
 
           fullResponse = result.content;
+          const extracted = this.extractSourceLinks(results);
+          sourceLinks = extracted.length > 0 ? extracted : undefined;
         } else {
           // Stream response from OpenAI without tools
           const messages = this.buildConversationHistory(context, userMessage);
@@ -270,10 +331,11 @@ export class ChatbotService {
         sessionId,
         userMessage,
         botResponse: fullResponse,
-        timestamp
+        timestamp,
+        sourceLinks
       };
 
-      callbacks.onComplete(fullResponse);
+      callbacks.onComplete(fullResponse, sourceLinks);
       return chatMessage;
     } catch (error) {
       console.error('❌ Failed to process streaming message:', error);

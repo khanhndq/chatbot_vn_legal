@@ -9,6 +9,12 @@ export interface ChatEvent {
   sessionId: string;
   userMessage: string;
   timestamp: Date;
+  stream?: boolean;
+}
+
+export interface SourceLink {
+  title: string;
+  url: string;
 }
 
 export interface ChatMessage {
@@ -18,6 +24,8 @@ export interface ChatMessage {
   bot_response: string;
   timestamp: Date;
   created_at?: Date;
+  isStreaming?: boolean;
+  sourceLinks?: SourceLink[];
 }
 
 export interface ChatSession {

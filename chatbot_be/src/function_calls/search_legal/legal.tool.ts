@@ -14,14 +14,17 @@ export const legalTool: Tool = {
       "Search the Vietnamese legal knowledge base for relevant laws, court precedents, and legal Q&A. " +
       "Use this tool when the user asks about Vietnamese labor law, social insurance, health insurance, " +
       "taxation, civil law, enterprise law, or any legal topic. Returns the most relevant legal text " +
-      "passages with source citations.",
+      "passages with source citations. " +
+      "IMPORTANT: The query MUST reflect only the user's CURRENT question. " +
+      "If the user switches topics, form a completely new query — do NOT carry over keywords from previous topics.",
     parameters: {
       type: "object",
       properties: {
         query: {
           type: "string",
           description:
-            "The search query or legal question from the user, in Vietnamese or English",
+            "The search query based on the user's CURRENT question only, in Vietnamese or English. " +
+            "Do NOT include terms from previous conversation topics — extract keywords only from the latest message.",
         },
         source_type: {
           type: "string",

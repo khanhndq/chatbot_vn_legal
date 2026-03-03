@@ -30,7 +30,7 @@ export class App {
         origin:
           process.env.NODE_ENV === "production"
             ? false
-            : ["http://localhost:3001", "http://localhost:5173"],
+            : ["http://localhost:3000", "http://localhost:3001", "http://localhost:5173"],
         methods: ["GET", "POST"],
       },
     });
@@ -50,7 +50,7 @@ export class App {
         origin:
           process.env.NODE_ENV === "production"
             ? false
-            : ["http://localhost:3001", "http://localhost:5173"],
+            : ["http://localhost:3000", "http://localhost:3001", "http://localhost:5173"],
         credentials: true,
       }),
     );

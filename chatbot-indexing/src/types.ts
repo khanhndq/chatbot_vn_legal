@@ -28,6 +28,7 @@ export interface LawMetadata extends BaseMetadata {
   section_title?: string;
   article: string;
   article_title?: string;
+  link?: string;
 }
 
 /** Metadata for precedent chunks */

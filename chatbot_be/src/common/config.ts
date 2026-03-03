@@ -17,8 +17,8 @@ const parseBoolean = (value: string | undefined, defaultValue: boolean): boolean
 const stripQuotes = (value: string | undefined, defaultValue: string = ''): string => {
   if (!value) return defaultValue;
   const trimmed = value.trim();
-  if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || 
-      (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
+  if ((trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
     return trimmed.slice(1, -1);
   }
   return trimmed;

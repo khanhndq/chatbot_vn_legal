@@ -5,6 +5,7 @@ import {
   ChatbotService,
   ChatMessage,
   StreamCallbacks,
+  SourceLink,
 } from "../services/chatbot.service";
 
 export interface WebSocketMessage {
@@ -12,6 +13,7 @@ export interface WebSocketMessage {
   content: string;
   timestamp: Date;
   sessionId?: string;
+  sourceLinks?: SourceLink[];
 }
 
 export interface ChatEvent {
@@ -70,16 +72,6 @@ export class WebSocketHandler {
       console.error("❌ Failed to create chat session:", error);
     });
 
-    // Send welcome message
-    const welcomeMessage: WebSocketMessage = {
-      type: "system",
-      content:
-        "Welcome to VietLegal Assistant! I'm here to help you. How can I assist you today?",
-      timestamp: new Date(),
-      sessionId,
-    };
-
-    socket.emit("message", welcomeMessage);
     socket.emit("session_created", { sessionId });
 
     // Setup socket event handlers
@@ -219,6 +211,7 @@ export class WebSocketHandler {
       content: chatMessage.botResponse,
       timestamp: chatMessage.timestamp,
       sessionId,
+      sourceLinks: chatMessage.sourceLinks,
     };
 
     socket.emit("bot_response", botMessage);
@@ -256,11 +249,12 @@ export class WebSocketHandler {
           timestamp: new Date(),
         });
       },
-      onComplete: async (fullResponse: string) => {
+      onComplete: async (fullResponse: string, sourceLinks?: SourceLink[]) => {
         socket.emit("stream_end", {
           content: fullResponse,
           sessionId,
           timestamp: new Date(),
+          sourceLinks,
         });
         console.log(`🤖 Streaming response completed for session ${sessionId}`);
       },
