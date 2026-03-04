@@ -57,12 +57,33 @@ export interface OpenAIConfig {
   temperature: number;
 }
 
+export interface ClaudeConfig {
+  apiKey: string;
+  model: string;
+  maxTokens: number;
+  temperature: number;
+}
+
+export interface GeminiConfig {
+  apiKey: string;
+  model: string;
+  maxTokens: number;
+  temperature: number;
+}
+
+export interface LLMConfig {
+  defaultProvider: 'openai' | 'claude' | 'gemini';
+}
+
 export interface Config {
   server: ServerConfig;
   database: DatabaseConfig;
   redis: RedisConfig;
   jwt: JwtConfig;
   openai: OpenAIConfig;
+  claude: ClaudeConfig;
+  gemini: GeminiConfig;
+  llm: LLMConfig;
 }
 
 /**
@@ -105,5 +126,26 @@ export const config: Config = {
     model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
     maxTokens: parseInt(process.env.OPENAI_MAX_TOKENS || '1024', 10),
     temperature: parseFloat(process.env.OPENAI_TEMPERATURE || '0.7'),
+  },
+
+  // Claude (Anthropic) Configuration
+  claude: {
+    apiKey: process.env.CLAUDE_API_KEY || '',
+    model: process.env.CLAUDE_MODEL || 'claude-3-haiku-20240307',
+    maxTokens: parseInt(process.env.CLAUDE_MAX_TOKENS || '1024', 10),
+    temperature: parseFloat(process.env.CLAUDE_TEMPERATURE || '0.7'),
+  },
+
+  // Gemini (Google) Configuration
+  gemini: {
+    apiKey: process.env.GEMINI_API_KEY || '',
+    model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+    maxTokens: parseInt(process.env.GEMINI_MAX_TOKENS || '1024', 10),
+    temperature: parseFloat(process.env.GEMINI_TEMPERATURE || '0.7'),
+  },
+
+  // LLM Provider Selection
+  llm: {
+    defaultProvider: (process.env.DEFAULT_LLM_PROVIDER || 'openai') as 'openai' | 'claude' | 'gemini',
   },
 };

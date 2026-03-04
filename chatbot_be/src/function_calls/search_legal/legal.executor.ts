@@ -1,4 +1,4 @@
-import { ToolExecutor } from "../../services/open-ai.service";
+import { LLMToolExecutor as ToolExecutor } from "../../providers/types";
 import { Pinecone } from "@pinecone-database/pinecone";
 import OpenAI from "openai";
 import { LegalSearchResult, LegalSearchResponse } from "./legal.types";

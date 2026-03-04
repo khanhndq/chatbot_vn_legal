@@ -1,17 +1,25 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { LLMModelType, LLMModelInfo } from '../types/chat';
+import ModelSelector from './ModelSelector';
 
 interface MessageInputProps {
   onSendMessage: (message: string) => void;
   disabled?: boolean;
   placeholder?: string;
   isWelcomeScreen?: boolean;
+  selectedModel?: LLMModelType;
+  onModelChange?: (model: LLMModelType) => void;
+  availableModels?: LLMModelInfo[];
 }
 
-const MessageInput: React.FC<MessageInputProps> = ({ 
-  onSendMessage, 
-  disabled = false, 
+const MessageInput: React.FC<MessageInputProps> = ({
+  onSendMessage,
+  disabled = false,
   placeholder = "Type your message...",
-  isWelcomeScreen = false
+  isWelcomeScreen = false,
+  selectedModel,
+  onModelChange,
+  availableModels,
 }) => {
   const [message, setMessage] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -29,7 +37,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
     if (message.trim() && !disabled) {
       onSendMessage(message.trim());
       setMessage('');
-      
+
       // Reset textarea height
       if (textareaRef.current) {
         textareaRef.current.style.height = 'auto';
@@ -66,7 +74,15 @@ const MessageInput: React.FC<MessageInputProps> = ({
           />
           <div className="flex items-center justify-between px-6 pb-4">
             <div className="flex items-center space-x-2">
-              <button 
+              {selectedModel && onModelChange && availableModels && (
+                <ModelSelector
+                  selectedModel={selectedModel}
+                  onModelChange={onModelChange}
+                  availableModels={availableModels}
+                  disabled={disabled}
+                />
+              )}
+              <button
                 type="button"
                 className="p-2 text-slate-400 hover:text-primary transition-colors"
                 title="Attach file"
@@ -74,7 +90,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
               >
                 <span className="material-symbols-outlined">attach_file</span>
               </button>
-              <button 
+              <button
                 type="button"
                 className="p-2 text-slate-400 hover:text-primary transition-colors"
                 title="Add image"
@@ -84,7 +100,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
               </button>
             </div>
             <div className="flex items-center space-x-3">
-              <button 
+              <button
                 type="button"
                 className="p-2 text-primary hover:bg-primary/10 rounded-full transition-colors"
                 title="Voice input"
@@ -114,4 +130,3 @@ const MessageInput: React.FC<MessageInputProps> = ({
 };
 
 export default MessageInput;
-

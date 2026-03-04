@@ -2,6 +2,8 @@ import { Router, Request, Response } from 'express';
 import { DatabaseService } from '../services/database.service';
 import { ChatbotService } from '../services/chatbot.service';
 import { RedisService } from '../services/redis.service';
+import { LLMFactory } from '../providers/llm-factory';
+import { config } from '../common/config';
 
 const router = Router();
 
@@ -81,8 +83,8 @@ router.get('/history/:sessionId', async (req: Request, res: Response) => {
  */
 router.post('/send', async (req: Request, res: Response) => {
   try {
-    const { sessionId, message } = req.body;
-    
+    const { sessionId, message, model } = req.body;
+
     if (!sessionId || !message) {
       return res.status(400).json({
         error: 'Session ID and message are required',
@@ -91,7 +93,7 @@ router.post('/send', async (req: Request, res: Response) => {
     }
 
     // Process message through chatbot
-    const chatMessage = await chatbotService.processMessage(sessionId, message);
+    const chatMessage = await chatbotService.processMessage(sessionId, message, model);
     
     // Store message in database
     const dbMessage = {
@@ -279,6 +281,43 @@ router.post('/cleanup', async (req: Request, res: Response) => {
     res.status(500).json({
       error: 'Failed to cleanup old data',
       timestamp: new Date().toISOString()
+    });
+    return;
+  }
+});
+
+/**
+ * @route GET /api/messages/models
+ * @desc Get available LLM models
+ * @access Public
+ */
+router.get('/models', async (req: Request, res: Response) => {
+  try {
+    const available = LLMFactory.getAvailableProviders();
+    const modelMap: Record<string, string> = {
+      openai: 'GPT-4o Mini',
+      claude: 'Claude 3 Haiku',
+      gemini: 'Gemini 1.5 Flash',
+    };
+
+    const models = available.map(p => ({
+      id: p,
+      name: modelMap[p] || p,
+      provider: p,
+    }));
+
+    res.status(200).json({
+      success: true,
+      models,
+      default: config.llm.defaultProvider,
+      timestamp: new Date().toISOString(),
+    });
+    return;
+  } catch (error) {
+    console.error('❌ Failed to get available models:', error);
+    res.status(500).json({
+      error: 'Failed to retrieve available models',
+      timestamp: new Date().toISOString(),
     });
     return;
   }

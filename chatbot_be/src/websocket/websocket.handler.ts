@@ -7,6 +7,7 @@ import {
   StreamCallbacks,
   SourceLink,
 } from "../services/chatbot.service";
+import { LLMProviderType } from "../providers/types";
 
 export interface WebSocketMessage {
   type: "chat" | "system" | "error";
@@ -20,7 +21,8 @@ export interface ChatEvent {
   sessionId: string;
   userMessage: string;
   timestamp: Date;
-  stream?: boolean; // Enable streaming response
+  stream?: boolean;
+  model?: LLMProviderType;
 }
 
 export class WebSocketHandler {
@@ -95,12 +97,14 @@ export class WebSocketHandler {
             socket,
             sessionId,
             data.userMessage,
+            data.model,
           );
         } else {
           await this.handleNonStreamingMessage(
             socket,
             sessionId,
             data.userMessage,
+            data.model,
           );
         }
       } catch (error) {
@@ -187,11 +191,13 @@ export class WebSocketHandler {
     socket: Socket,
     sessionId: string,
     userMessage: string,
+    model?: LLMProviderType,
   ): Promise<void> {
     // Process message through chatbot
     const chatMessage = await this.chatbotService.processMessage(
       sessionId,
       userMessage,
+      model,
     );
 
     // Store message in database
@@ -234,6 +240,7 @@ export class WebSocketHandler {
     socket: Socket,
     sessionId: string,
     userMessage: string,
+    model?: LLMProviderType,
   ): Promise<void> {
     // Notify client that streaming is starting
     socket.emit("stream_start", {
@@ -273,6 +280,7 @@ export class WebSocketHandler {
       sessionId,
       userMessage,
       callbacks,
+      model,
     );
 
     // Store complete message in database

@@ -1,4 +1,4 @@
-import { Tool } from "../../services/open-ai.service";
+import { LLMTool as Tool } from "../../providers/types";
 
 /**
  * OpenAI function calling tool schema for search_legal.

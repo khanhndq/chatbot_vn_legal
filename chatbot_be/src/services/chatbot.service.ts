@@ -1,6 +1,8 @@
 import { v4 as uuidv4 } from 'uuid';
 import { RedisService, ChatbotResponse, SessionData } from './redis.service';
-import { OpenAIService, ChatCompletionMessage, OpenAIMessage, ToolExecutor } from './open-ai.service';
+import { LLMMessage, LLMToolExecutor, LLMProviderType } from '../providers/types';
+import { ILLMProvider } from '../providers/llm-provider.interface';
+import { LLMFactory } from '../providers/llm-factory';
 import { chatbotTools, chatbotToolExecutor } from '../common/functions';
 import { config } from '../common/config';
 import { SYSTEM_PROMPT } from '../common/prompt';
@@ -36,7 +38,6 @@ export interface StreamCallbacks {
 
 export class ChatbotService {
   private redisService: RedisService;
-  private openAIService: OpenAIService | null = null;
   private config: ChatbotConfig;
 
   constructor(redisService: RedisService) {
@@ -50,34 +51,37 @@ export class ChatbotService {
       useTools: config.openai.useTools
     };
 
-    // Initialize OpenAI service if enabled
     if (this.config.useOpenAI) {
-      try {
-        this.openAIService = new OpenAIService();
-        console.log('✅ ChatbotService initialized with OpenAI');
-        if (this.config.useTools) {
-          console.log('🔧 Tool calling enabled with FAQ tool');
-        }
-      } catch (error) {
-        console.error('❌ Failed to initialize OpenAI, falling back to simple responses:', error);
-        this.config.useOpenAI = false;
+      const available = LLMFactory.getAvailableProviders();
+      console.log(`✅ ChatbotService initialized. Available LLM providers: ${available.join(', ')}`);
+      if (this.config.useTools) {
+        console.log('🔧 Tool calling enabled');
       }
     } else {
-      console.log('ℹ️ ChatbotService initialized without OpenAI (set USE_OPENAI=true to enable)');
+      console.log('ℹ️ ChatbotService initialized without LLM (set USE_OPENAI=true to enable)');
     }
+  }
+
+  /**
+   * Get an LLM provider by type, falling back to the default.
+   */
+  private getProvider(providerType?: LLMProviderType): ILLMProvider {
+    return LLMFactory.getProvider(providerType);
   }
 
   /**
    * Process user message and generate bot response
    */
   public async processMessage(
-    sessionId: string, 
-    userMessage: string
+    sessionId: string,
+    userMessage: string,
+    providerType?: LLMProviderType
   ): Promise<ChatMessage> {
     try {
-      // Check for cached response first
-      const cachedResponse = await this.redisService.getCachedResponse(userMessage);
-      
+      // Check for cached response first (include provider in cache key)
+      const cacheKey = providerType ? `${providerType}:${userMessage}` : userMessage;
+      const cachedResponse = await this.redisService.getCachedResponse(cacheKey);
+
       let botResponse: string;
       let confidence: number;
       let sourceLinks: SourceLink[] | undefined;
@@ -85,16 +89,16 @@ export class ChatbotService {
       if (cachedResponse) {
         botResponse = cachedResponse.response;
         confidence = cachedResponse.confidence;
-        console.log(`📋 Using cached response for: "${userMessage}"`);
+        console.log(`📋 Using cached response for: "${userMessage}" [${providerType || 'default'}]`);
       } else {
         // Generate new response
-        const response = await this.generateResponse(userMessage, sessionId);
+        const response = await this.generateResponse(userMessage, sessionId, providerType);
         botResponse = response.response;
         confidence = response.confidence;
         sourceLinks = response.sourceLinks;
 
         // Cache the response
-        await this.redisService.cacheChatbotResponse(userMessage, response);
+        await this.redisService.cacheChatbotResponse(cacheKey, response);
       }
 
       // Update session context
@@ -113,7 +117,7 @@ export class ChatbotService {
       return chatMessage;
     } catch (error) {
       console.error('❌ Failed to process message:', error);
-      
+
       // Return fallback response
       return {
         id: uuidv4(),
@@ -159,9 +163,9 @@ export class ChatbotService {
   /**
    * Create a wrapper around the tool executor that captures raw result strings.
    */
-  private createCapturingExecutor(): { executor: ToolExecutor; results: string[] } {
+  private createCapturingExecutor(): { executor: LLMToolExecutor; results: string[] } {
     const results: string[] = [];
-    const executor: ToolExecutor = async (name, args) => {
+    const executor: LLMToolExecutor = async (name, args) => {
       const result = await chatbotToolExecutor(name, args);
       results.push(result);
       return result;
@@ -174,25 +178,28 @@ export class ChatbotService {
    */
   private async generateResponse(
     userMessage: string,
-    sessionId: string
+    sessionId: string,
+    providerType?: LLMProviderType
   ): Promise<ChatbotResponse & { sourceLinks?: SourceLink[] }> {
     // Get session context for more contextual responses
     const sessionData = await this.redisService.getSessionData(sessionId);
     const context = sessionData?.context || [];
 
-    // Use OpenAI if enabled and available
-    if (this.config.useOpenAI && this.openAIService) {
+    // Use LLM if enabled
+    if (this.config.useOpenAI) {
       try {
+        const provider = this.getProvider(providerType);
+
         // Use tools with required tool choice if enabled
         if (this.config.useTools) {
-          const messages = this.buildConversationHistoryForTools(context, userMessage);
+          const messages = this.buildConversationHistory(context, userMessage);
           const { executor, results } = this.createCapturingExecutor();
-          const response = await this.openAIService.runWithTools(
+          const response = await provider.runWithTools(
             messages,
             chatbotTools,
             executor,
             {
-              toolChoice: 'required', // Force tool use
+              toolChoice: 'required',
               maxToolCalls: 3
             }
           );
@@ -209,7 +216,7 @@ export class ChatbotService {
 
         // Regular chat without tools
         const messages = this.buildConversationHistory(context, userMessage);
-        const response = await this.openAIService.chat(messages);
+        const response = await provider.chat(messages);
 
         return {
           response: response.content,
@@ -217,7 +224,7 @@ export class ChatbotService {
           timestamp: Date.now()
         };
       } catch (error) {
-        console.error('❌ OpenAI request failed, falling back to simple response:', error);
+        console.error(`❌ LLM request failed (${providerType || 'default'}), falling back to simple response:`, error);
       }
     }
 
@@ -232,34 +239,13 @@ export class ChatbotService {
   }
 
   /**
-   * Build conversation history for OpenAI with tools (uses OpenAIMessage type)
-   */
-  private buildConversationHistoryForTools(context: string[], userMessage: string): OpenAIMessage[] {
-    const messages: OpenAIMessage[] = [
-      { role: 'system', content: SYSTEM_PROMPT }
-    ];
-
-    // Add context as previous messages (alternating user/assistant)
-    context.forEach((msg, index) => {
-      messages.push({
-        role: index % 2 === 0 ? 'user' : 'assistant',
-        content: msg
-      });
-    });
-
-    // Add current user message
-    messages.push({ role: 'user', content: userMessage });
-
-    return messages;
-  }
-
-  /**
    * Process message with streaming response
    */
   public async processMessageStream(
     sessionId: string,
     userMessage: string,
-    callbacks: StreamCallbacks
+    callbacks: StreamCallbacks,
+    providerType?: LLMProviderType
   ): Promise<ChatMessage> {
     const messageId = uuidv4();
     const timestamp = new Date();
@@ -272,13 +258,15 @@ export class ChatbotService {
       let fullResponse = '';
       let sourceLinks: SourceLink[] | undefined;
 
-      if (this.config.useOpenAI && this.openAIService) {
+      if (this.config.useOpenAI) {
+        const provider = this.getProvider(providerType);
+
         // Use streaming with tools if enabled
         if (this.config.useTools) {
-          const messages = this.buildConversationHistoryForTools(context, userMessage);
+          const messages = this.buildConversationHistory(context, userMessage);
           const { executor, results } = this.createCapturingExecutor();
 
-          const result = await this.openAIService.streamChatWithTools(
+          const result = await provider.streamChatWithTools(
             messages,
             chatbotTools,
             executor,
@@ -287,7 +275,7 @@ export class ChatbotService {
               callbacks.onChunk(chunk);
             },
             {
-              toolChoice: 'required', // Force tool use
+              toolChoice: 'required',
               maxToolCalls: 3
             }
           );
@@ -296,10 +284,10 @@ export class ChatbotService {
           const extracted = this.extractSourceLinks(results);
           sourceLinks = extracted.length > 0 ? extracted : undefined;
         } else {
-          // Stream response from OpenAI without tools
+          // Stream response without tools
           const messages = this.buildConversationHistory(context, userMessage);
 
-          const result = await this.openAIService.streamChat(
+          const result = await provider.streamChat(
             messages,
             (chunk: string) => {
               fullResponse += chunk;
@@ -318,7 +306,7 @@ export class ChatbotService {
         const words = fullResponse.split(' ');
         for (const word of words) {
           callbacks.onChunk(word + ' ');
-          await this.delay(50); // Small delay between words
+          await this.delay(50);
         }
       }
 
@@ -353,10 +341,10 @@ export class ChatbotService {
   }
 
   /**
-   * Build conversation history for OpenAI
+   * Build conversation history as LLMMessage array
    */
-  private buildConversationHistory(context: string[], userMessage: string): ChatCompletionMessage[] {
-    const messages: ChatCompletionMessage[] = [
+  private buildConversationHistory(context: string[], userMessage: string): LLMMessage[] {
+    const messages: LLMMessage[] = [
       { role: 'system', content: this.config.systemPrompt }
     ];
 
@@ -385,11 +373,11 @@ export class ChatbotService {
    * Generate simple response based on message content
    */
   private generateSimpleResponse(
-    message: string, 
+    message: string,
     context: string[]
   ): { text: string; confidence: number } {
     const lowerMessage = message.toLowerCase().trim();
-    
+
     // Greeting patterns
     if (this.matchesPattern(lowerMessage, ['hello', 'hi', 'hey', 'good morning', 'good afternoon'])) {
       return {
@@ -448,8 +436,7 @@ export class ChatbotService {
     // Context-aware responses
     if (context.length > 0) {
       const lastMessage = context[context.length - 1].toLowerCase();
-      
-      // If user is asking for clarification
+
       if (this.matchesPattern(lowerMessage, ['what do you mean', 'explain', 'clarify'])) {
         return {
           text: "I understand you'd like me to clarify something. Could you be more specific about what you'd like me to explain?",
@@ -457,7 +444,6 @@ export class ChatbotService {
         };
       }
 
-      // If user is repeating themselves
       if (this.isSimilarTo(lowerMessage, lastMessage)) {
         return {
           text: "I think you might have mentioned that before. Could you try rephrasing your question or ask something different?",
@@ -480,54 +466,39 @@ export class ChatbotService {
     };
   }
 
-  /**
-   * Check if message matches any patterns
-   */
   private matchesPattern(message: string, patterns: string[]): boolean {
     return patterns.some(pattern => message.includes(pattern));
   }
 
-  /**
-   * Check if two messages are similar
-   */
   private isSimilarTo(message1: string, message2: string): boolean {
     const words1 = message1.split(' ').filter(word => word.length > 3);
     const words2 = message2.split(' ').filter(word => word.length > 3);
-    
+
     const commonWords = words1.filter(word => words2.includes(word));
     const similarity = commonWords.length / Math.max(words1.length, words2.length);
-    
+
     return similarity > 0.6;
   }
 
-  /**
-   * Get random response from array
-   */
   private getRandomResponse(responses: string[]): string {
     return responses[Math.floor(Math.random() * responses.length)];
   }
 
-  /**
-   * Update session context with new message
-   */
   private async updateSessionContext(sessionId: string, message: string): Promise<void> {
     try {
       const sessionData = await this.redisService.getSessionData(sessionId);
       let context: string[] = [];
-      
+
       if (sessionData) {
         context = sessionData.context;
       }
 
-      // Add new message to context
       context.push(message);
 
-      // Limit context length
       if (context.length > this.config.maxContextLength) {
         context = context.slice(-this.config.maxContextLength);
       }
 
-      // Update or create session data
       const newSessionData: SessionData = {
         sessionId,
         lastMessage: message,
@@ -538,20 +509,17 @@ export class ChatbotService {
       await this.redisService.storeSessionData(newSessionData);
     } catch (error) {
       console.error('❌ Failed to update session context:', error);
-      // Don't throw as context update is not critical
     }
   }
 
-  /**
-   * Get chatbot statistics
-   */
   public async getStats(): Promise<Record<string, any>> {
     try {
       const redisStats = await this.redisService.getStats();
-      
+
       return {
         service: 'ChatbotService',
         config: this.config,
+        availableProviders: LLMFactory.getAvailableProviders(),
         redis: redisStats,
         timestamp: new Date().toISOString()
       };
@@ -565,17 +533,11 @@ export class ChatbotService {
     }
   }
 
-  /**
-   * Update chatbot configuration
-   */
   public updateConfig(newConfig: Partial<ChatbotConfig>): void {
     this.config = { ...this.config, ...newConfig };
     console.log('✅ Chatbot configuration updated:', this.config);
   }
 
-  /**
-   * Get current configuration
-   */
   public getConfig(): ChatbotConfig {
     return { ...this.config };
   }

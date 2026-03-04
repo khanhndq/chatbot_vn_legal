@@ -1,4 +1,4 @@
-import { ToolExecutor } from '../../services/open-ai.service';
+import { LLMToolExecutor as ToolExecutor } from '../../providers/types';
 import { FAQItem } from './faq.types';
 import { FAQ_DATA } from './faq.data';
 

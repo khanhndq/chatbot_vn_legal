@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { WebSocketMessage, ChatMessage, SourceLink } from '../types/chat';
+import { WebSocketMessage, ChatMessage, SourceLink, LLMModelType, LLMModelInfo } from '../types/chat';
 import websocketService from '../services/websocket.service';
 import apiService from '../services/api.service';
 
@@ -13,6 +13,9 @@ interface UseChatReturn {
   sendMessage: (message: string) => void;
   clearMessages: () => void;
   connectionStatus: 'connecting' | 'connected' | 'disconnected' | 'error';
+  selectedModel: LLMModelType;
+  setSelectedModel: (model: LLMModelType) => void;
+  availableModels: LLMModelInfo[];
 }
 
 export const useChat = (sessionId?: string): UseChatReturn => {
@@ -21,24 +24,48 @@ export const useChat = (sessionId?: string): UseChatReturn => {
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected' | 'error'>('disconnected');
-  
+
+  // Model selection state (persisted in localStorage)
+  const [selectedModel, setSelectedModel] = useState<LLMModelType>(
+    () => (localStorage.getItem('selectedModel') as LLMModelType) || 'openai'
+  );
+  const [availableModels, setAvailableModels] = useState<LLMModelInfo[]>([]);
+
   const queryClient = useQueryClient();
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Persist model selection
+  useEffect(() => {
+    localStorage.setItem('selectedModel', selectedModel);
+  }, [selectedModel]);
+
+  // Fetch available models on mount
+  useEffect(() => {
+    apiService.getAvailableModels().then(data => {
+      setAvailableModels(data.models);
+      // If selected model is not available, fall back to default
+      if (data.models.length > 0 && !data.models.find(m => m.id === selectedModel)) {
+        setSelectedModel(data.default as LLMModelType);
+      }
+    }).catch(err => {
+      console.error('Failed to fetch available models:', err);
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Query for chat history
   const { data: chatHistory, isLoading } = useQuery({
     queryKey: ['chatHistory', sessionId],
     queryFn: () => sessionId ? apiService.getChatHistory(sessionId) : null,
     enabled: !!sessionId && isConnected,
-    staleTime: 5 * 60 * 1000, // 5 minutes
+    staleTime: 5 * 60 * 1000,
   });
 
   // Mutation for sending messages via REST API (fallback)
   const sendMessageMutation = useMutation({
-    mutationFn: ({ sessionId, message }: { sessionId: string; message: string }) =>
-      apiService.sendMessage(sessionId, message),
+    mutationFn: ({ sessionId, message, model }: { sessionId: string; message: string; model?: LLMModelType }) =>
+      apiService.sendMessage(sessionId, message, model),
     onSuccess: (data) => {
-      // Add the new message to the local state
       const newMessage: ChatMessage = {
         id: data.messageId,
         session_id: data.sessionId,
@@ -46,10 +73,8 @@ export const useChat = (sessionId?: string): UseChatReturn => {
         bot_response: data.botResponse,
         timestamp: data.timestamp,
       };
-      
+
       setMessages(prev => [...prev, newMessage]);
-      
-      // Invalidate and refetch chat history
       queryClient.invalidateQueries({ queryKey: ['chatHistory', sessionId] });
     },
     onError: (error: any) => {
@@ -60,7 +85,6 @@ export const useChat = (sessionId?: string): UseChatReturn => {
   // Event handlers
   const handleIncomingMessage = useCallback((message: WebSocketMessage) => {
     if (message.type === 'system') {
-      // Handle system messages (welcome, etc.)
       const systemMessage: ChatMessage = {
         id: `system-${Date.now()}`,
         session_id: message.sessionId || sessionId || '',
@@ -68,17 +92,15 @@ export const useChat = (sessionId?: string): UseChatReturn => {
         bot_response: message.content,
         timestamp: message.timestamp,
       };
-      
+
       setMessages(prev => [...prev, systemMessage]);
     }
   }, [sessionId]);
 
   const handleBotResponse = useCallback((message: WebSocketMessage & { sourceLinks?: SourceLink[] }) => {
-    // Find the last user message and update it with bot response
     setMessages(prev => {
       const lastMessage = prev[prev.length - 1];
       if (lastMessage && !lastMessage.bot_response) {
-        // Update the last message with bot response
         return prev.map((msg, index) =>
           index === prev.length - 1
             ? { ...msg, bot_response: message.content, sourceLinks: message.sourceLinks }
@@ -110,7 +132,6 @@ export const useChat = (sessionId?: string): UseChatReturn => {
   }, []);
 
   const handleTypingIndicator = useCallback((data: { sessionId: string; isTyping: boolean }) => {
-    // Handle typing indicators if needed
     console.log('Typing indicator:', data);
   }, []);
 
@@ -183,8 +204,7 @@ export const useChat = (sessionId?: string): UseChatReturn => {
     try {
       setConnectionStatus('connecting');
       setError(null);
-      
-      // Setup WebSocket event handlers
+
       websocketService.onMessage(handleIncomingMessage);
       websocketService.onBotResponse(handleBotResponse);
       websocketService.onError(handleWebSocketError);
@@ -198,7 +218,6 @@ export const useChat = (sessionId?: string): UseChatReturn => {
       websocketService.onStreamEnd(handleStreamEnd);
       websocketService.onStreamError(handleStreamError);
 
-      // Connect to WebSocket
       await websocketService.connect(sessionId);
 
     } catch (error) {
@@ -222,18 +241,16 @@ export const useChat = (sessionId?: string): UseChatReturn => {
     handleStreamError,
   ]);
 
-  // Initialize WebSocket connection
   useEffect(() => {
     if (sessionId) {
       initializeWebSocket();
     }
-    
+
     return () => {
       websocketService.disconnect();
     };
   }, [sessionId, initializeWebSocket]);
 
-  // Update messages when chat history is loaded
   useEffect(() => {
     if (chatHistory?.messages) {
       setMessages(chatHistory.messages);
@@ -243,7 +260,6 @@ export const useChat = (sessionId?: string): UseChatReturn => {
   const sendMessage = useCallback((message: string) => {
     if (!message.trim() || isStreaming) return;
 
-    // Add user message to local state immediately
     const userMessage: ChatMessage = {
       id: `user-${Date.now()}`,
       session_id: sessionId || '',
@@ -257,27 +273,25 @@ export const useChat = (sessionId?: string): UseChatReturn => {
 
     // Try to send via WebSocket first
     if (isConnected && websocketService.getConnectionStatus()) {
-      websocketService.sendMessage(message.trim());
+      websocketService.sendMessage(message.trim(), selectedModel);
     } else {
       // Fallback to REST API (non-streaming)
       userMessage.isStreaming = false;
       if (sessionId) {
-        sendMessageMutation.mutate({ sessionId, message: message.trim() });
+        sendMessageMutation.mutate({ sessionId, message: message.trim(), model: selectedModel });
       } else {
         setError('No active session');
       }
     }
 
-    // Clear any existing error
     setError(null);
-  }, [isConnected, isStreaming, sessionId, sendMessageMutation]);
+  }, [isConnected, isStreaming, sessionId, selectedModel, sendMessageMutation]);
 
   const clearMessages = useCallback(() => {
     setMessages([]);
     setError(null);
   }, []);
 
-  // Cleanup typing timeout on unmount
   useEffect(() => {
     return () => {
       if (typingTimeoutRef.current) {
@@ -295,5 +309,8 @@ export const useChat = (sessionId?: string): UseChatReturn => {
     sendMessage,
     clearMessages,
     connectionStatus,
+    selectedModel,
+    setSelectedModel,
+    availableModels,
   };
 };

@@ -1,9 +1,11 @@
 import axios, { AxiosInstance } from 'axios';
-import { 
-  ChatHistoryResponse, 
-  SendMessageResponse, 
+import {
+  ChatHistoryResponse,
+  SendMessageResponse,
   HealthResponse,
-  ChatSession 
+  ChatSession,
+  LLMModelType,
+  LLMModelInfo,
 } from '../types/chat';
 
 class ApiService {
@@ -58,11 +60,18 @@ class ApiService {
   }
 
   // Send message via REST API (alternative to WebSocket)
-  async sendMessage(sessionId: string, message: string): Promise<SendMessageResponse> {
+  async sendMessage(sessionId: string, message: string, model?: LLMModelType): Promise<SendMessageResponse> {
     const response = await this.api.post('/api/messages/send', {
       sessionId,
-      message
+      message,
+      model,
     });
+    return response.data;
+  }
+
+  // Get available LLM models
+  async getAvailableModels(): Promise<{ models: LLMModelInfo[]; default: string }> {
+    const response = await this.api.get('/api/messages/models');
     return response.data;
   }
 

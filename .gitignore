@@ -24,3 +24,6 @@ dist/
 build/
 */build/
 .env
+
+test
+docs

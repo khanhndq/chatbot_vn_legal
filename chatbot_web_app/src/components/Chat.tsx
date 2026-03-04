@@ -24,6 +24,9 @@ const Chat: React.FC<ChatProps> = ({
     error,
     sendMessage,
     connectionStatus,
+    selectedModel,
+    setSelectedModel,
+    availableModels,
   } = useChat(sessionId);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -112,6 +115,9 @@ const Chat: React.FC<ChatProps> = ({
                     : "Hỏi tôi bất cứ điều gì về luật lao động, bảo hiểm, thuế, doanh nghiệp hoặc pháp luật dân sự..."
                 }
                 isWelcomeScreen={true}
+                selectedModel={selectedModel}
+                onModelChange={setSelectedModel}
+                availableModels={availableModels}
               />
             </div>
           </div>
@@ -161,6 +167,9 @@ const Chat: React.FC<ChatProps> = ({
                     : "Nhập tin nhắn..."
               }
               isWelcomeScreen={false}
+              selectedModel={selectedModel}
+              onModelChange={setSelectedModel}
+              availableModels={availableModels}
             />
           </div>
         </main>

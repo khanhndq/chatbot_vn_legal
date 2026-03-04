@@ -1,4 +1,4 @@
-import { Tool, ToolExecutor } from "../services/open-ai.service";
+import { LLMTool as Tool, LLMToolExecutor as ToolExecutor } from "../providers/types";
 import { faqTool, faqToolExecutor } from "./faq";
 import { legalTool, legalToolExecutor } from "./search_legal";
 

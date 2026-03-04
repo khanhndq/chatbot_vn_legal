@@ -1,4 +1,4 @@
-import { Tool } from '../../services/open-ai.service';
+import { LLMTool as Tool } from '../../providers/types';
 
 // FAQ Tool Definition
 export const faqTool: Tool = {

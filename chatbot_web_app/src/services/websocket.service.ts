@@ -1,5 +1,5 @@
 import { io, Socket } from 'socket.io-client';
-import { WebSocketMessage, ChatEvent, TypingIndicator, SourceLink } from '../types/chat';
+import { WebSocketMessage, ChatEvent, TypingIndicator, SourceLink, LLMModelType } from '../types/chat';
 
 class WebSocketService {
   private socket: Socket | null = null;
@@ -250,14 +250,15 @@ class WebSocketService {
     }
   }
 
-  sendMessage(message: string): void {
+  sendMessage(message: string, model?: LLMModelType): void {
     if (this.socket && this.isConnected && this.sessionId) {
-      console.log(`💬 Sending message: ${message}`);
+      console.log(`💬 Sending message: ${message} [model: ${model || 'default'}]`);
       const chatEvent: ChatEvent = {
         sessionId: this.sessionId,
         userMessage: message,
         timestamp: new Date(),
         stream: true,
+        model,
       };
       this.socket.emit('chat_message', chatEvent);
     } else {

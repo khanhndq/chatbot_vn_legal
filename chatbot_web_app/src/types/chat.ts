@@ -1,3 +1,11 @@
+export type LLMModelType = 'openai' | 'claude' | 'gemini';
+
+export interface LLMModelInfo {
+  id: LLMModelType;
+  name: string;
+  provider: string;
+}
+
 export interface WebSocketMessage {
   type: 'chat' | 'system' | 'error';
   content: string;
@@ -10,6 +18,7 @@ export interface ChatEvent {
   userMessage: string;
   timestamp: Date;
   stream?: boolean;
+  model?: LLMModelType;
 }
 
 export interface SourceLink {
